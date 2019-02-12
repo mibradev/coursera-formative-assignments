@@ -15,7 +15,7 @@ class Solution
   # using the default.
   def self.mongo_client
     url=ENV['MONGO_URL'] ||= MONGO_URL
-    database=ENV['MONGO_DATABASE'] ||= MONGO_DATABASE 
+    database=ENV['MONGO_DATABASE'] ||= MONGO_DATABASE
     db = Mongo::Client.new(url)
     @@db=db.use(database)
   end
@@ -26,9 +26,9 @@ class Solution
     collection=ENV['RACE_COLLECTION'] ||= RACE_COLLECTION
     return mongo_client[collection]
   end
-  
+
   # helper method that will load a file and return a parsed JSON document as a hash
-  def self.load_hash(file_path) 
+  def self.load_hash(file_path)
     file=File.read(file_path)
     JSON.parse(file)
   end
@@ -39,7 +39,7 @@ class Solution
   end
 
   # drop the current contents of the collection and reload from data file
-  def self.reset(file_path) 
+  def self.reset(file_path)
     self.collection.delete_many({})
     hash=self.load_hash(file_path)
     self.collection.insert_many(hash)
@@ -56,15 +56,23 @@ class Solution
   #
 
   def racer_names
-    #place solution here
+    @coll.aggregate([{ :$project => {
+      _id: false,
+      first_name: true,
+      last_name: true
+    } }])
   end
 
-  def id_number_map 
-    #place solution here
+  def id_number_map
+    @coll.aggregate([{ :$project => { number: true } }])
   end
 
   def concat_names
-    #place solution here
+    @coll.aggregate([{ :$project => {
+      _id: false,
+      number: true,
+      name: { :$concat => ["$first_name", "$last_name"] }
+    } }])
   end
 
   #
@@ -73,26 +81,51 @@ class Solution
   #
 
   def group_times
-    #place solution here
+    @coll.aggregate([{ :$group => {
+      _id: { age: "$group", gender: "$gender" },
+      runners: { :$sum => 1 },
+      fastest_time: { :$min => "$secs" }
+    } }])
   end
 
   def group_last_names
-    #place solution here
+    @coll.aggregate([{ :$group => {
+      _id: { age: "$group", gender: "$gender" },
+      last_names: { :$push => "$last_name" }
+    } }])
   end
 
   def group_last_names_set
-    #place solution here
+    @coll.aggregate([{ :$group => {
+      _id: { age: "$group", gender: "$gender" },
+      last_names: { :$addToSet => "$last_name" }
+    } }])
   end
 
   #
   # Lecture 4: $match
   #
   def groups_faster_than criteria_time
-    #place solution here
+    @coll.aggregate([
+      { :$group => {
+        _id: { age: "$group", gender: "$gender" },
+        runners: { :$sum => 1 },
+        fastest_time: { :$min => "$secs" }
+      } },
+      { :$match => { fastest_time: { :$lte => criteria_time } } }
+    ])
   end
 
   def age_groups_faster_than age_group, criteria_time
-    #place solution here
+    @coll.aggregate([
+      { :$match => { group: age_group } },
+      { :$group => {
+        _id: { age: "$group", gender: "$gender" },
+        runners: { :$sum => 1 },
+        fastest_time: { :$min => "$secs" }
+      } },
+      { :$match => { fastest_time: { :$lte => criteria_time } } }
+    ])
   end
 
 
@@ -100,16 +133,33 @@ class Solution
   # Lecture 5: $unwind
   #
   def avg_family_time last_name
-    #place solution here
+    @coll.aggregate([
+      { :$match => { last_name: last_name } },
+      { :$group => {
+        _id: "$last_name",
+        avg_time: { :$avg => "$secs" },
+        numbers: { :$push => "$number" }
+      } },
+      { :$project => { avg_time: true, numbers: true } }
+    ])
   end
-  
+
   def number_goal last_name
-    #place solution here
+    @coll.aggregate([
+      { :$match => { last_name: last_name } },
+      { :$group => {
+        _id: "$last_name",
+        avg_time: { :$avg => "$secs" },
+        numbers: { :$push => "$number" }
+      } },
+      { :$unwind => "$numbers" },
+      { :$project => { _id: false, avg_time: true, number: "$numbers", last_name: "$_id" } }
+    ])
   end
 
 end
 
-file_path= "../student-start/race_results.json"
+file_path= "race_results.json"
 puts "cannot find bootstrap at #{file_path}" if !File.exists?(file_path)
 Solution.reset(file_path)
 s=Solution.new
